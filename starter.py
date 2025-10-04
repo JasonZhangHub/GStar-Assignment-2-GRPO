@@ -446,7 +446,18 @@ def masked_mean(tensor: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     Compute the mean of tensor values where mask=True for each row, then average across the batch.
     """
     ### YOUR CODE HERE ###
-    pass
+    # Sum tensor values where mask is True for each sequence
+    masked_sum = (tensor * mask).sum(dim=1)
+
+    # Count number of True values in mask for each sequence
+    mask_count = mask.sum(dim=1)
+
+    # Avoid division by zero
+    mask_count = torch.clamp(mask_count, min=1)
+
+    # Compute mean for each sequence, then average across batch
+    sequence_means = masked_sum / mask_count
+    return sequence_means.mean()
     ### END YOUR CODE ###
 
 def masked_mean_drgrpo(tensor: torch.Tensor, mask: torch.Tensor, num_tokens: int) -> torch.Tensor:
@@ -455,7 +466,14 @@ def masked_mean_drgrpo(tensor: torch.Tensor, mask: torch.Tensor, num_tokens: int
     This is used for the DR-GRPO loss
     """
     ### YOUR CODE HERE ###
-    pass
+    # Sum tensor values where mask is True for each sequence
+    masked_sum = (tensor * mask).sum(dim=1)
+
+    # Divide by fixed constant num_tokens instead of actual response length
+    sequence_normalized = masked_sum / num_tokens
+
+    # Average across batch
+    return sequence_normalized.mean()
     ### END YOUR CODE ###
 
 def get_response_log_probs(model: PreTrainedModel, input_ids: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
