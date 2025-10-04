@@ -135,7 +135,11 @@ def _extract_answer(solution_str: str) -> str | None:
         The stripped string content of the last answer tag, or None if no tag is found.
     """
     ### YOUR CODE HERE ###
-    pass
+    pattern = r'<answer>(.*?)</answer>'
+    matches = list(re.finditer(pattern, solution_str, re.DOTALL))
+    if matches:
+        return matches[-1].group(1).strip()
+    return None
     ### END YOUR CODE ###
 
 
@@ -155,7 +159,13 @@ def _validate_numbers(equation_str: str, available_numbers: List[int]) -> bool:
         True if the equation uses the correct numbers, False otherwise.
     """
     ### YOUR CODE HERE ###
-    pass
+    try:
+        used_numbers = [int(num) for num in re.findall(r"\d+", equation_str)]
+        available_sorted = sorted(available_numbers)
+        used_sorted = sorted(used_numbers)
+        return available_sorted == used_sorted
+    except:
+        return False
     ### END YOUR CODE ###
 
 
@@ -168,7 +178,21 @@ def _evaluate_equation(equation_str: str) -> float | None:
         The result of the equation as a float, or None if it's invalid or unsafe.
     """
     ### YOUR CODE HERE ###
-    pass
+    try:
+        # Only allow digits, spaces, and basic arithmetic operators
+        allowed_chars = set('0123456789 +-*/()')
+        if not all(c in allowed_chars for c in equation_str):
+            return None
+
+        # Check for implicit multiplication (e.g., "2(3)" or "(2)(3)")
+        if re.search(r'\d\s*\(|\)\s*\(|\)\s*\d', equation_str):
+            return None
+
+        # Evaluate the equation
+        result = eval(equation_str)
+        return float(result)
+    except:
+        return None
     ### END YOUR CODE ###
 
 # ==============================================================================
@@ -194,7 +218,27 @@ def reward_fn(generated_text: str, ground_truth: Dict) -> float:
         A float value representing the reward, such as 1.0, 0.1, or 0.0
     """
     ### YOUR CODE HERE ###
-    pass
+    # Extract the equation from the generated text
+    equation = _extract_answer(generated_text)
+
+    # If no <answer> tag found, return 0.0
+    if equation is None:
+        return 0.0
+
+    # Extract target and available numbers from ground truth
+    target = ground_truth["target"]
+    available_numbers = ground_truth["numbers"]
+
+    # Validate numbers and evaluate equation
+    numbers_valid = _validate_numbers(equation, available_numbers)
+    result = _evaluate_equation(equation)
+
+    # Check if equation is correct (valid numbers, evaluates correctly to target)
+    if numbers_valid and result is not None and abs(result - target) < 1e-6:
+        return 1.0
+
+    # If <answer> tag exists but equation is wrong, return 0.1
+    return 0.1
     ### END YOUR CODE ###
 
 
@@ -292,7 +336,7 @@ def compute_group_normalized_advantages(
     normalize_by_std: bool,
 ) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, torch.Tensor]]:
     """ Computes advantages by normalizing rewards within groups.
-    
+
     Args:
         rollout_responses: List of generated responses (length = batch_size * group_size)
         repeated_ground_truths: Ground truth repeated for each response
@@ -300,7 +344,7 @@ def compute_group_normalized_advantages(
         group_size: Number of responses per question (G)
         advantage_eps: Small constant for numerical stability (epsilon)
         normalize_by_std: If True, normalize by std (GRPO); if False, don't (DR-GRPO)
-    
+
     Returns:
         advantages: Flattened tensor of advantages (shape: [batch_size * group_size])
         raw_rewards: Original rewards before normalization
@@ -323,7 +367,34 @@ def compute_group_normalized_advantages(
     # 7. Create a `metadata` dictionary with overall statistics of the raw rewards.
     advantages, raw_rewards, metadata = None, None, {}
     ### YOUR CODE HERE ###
-    pass
+    # Step 1: Calculate raw rewards for each response
+    rewards_list = [reward_fn(response, gt) for response, gt in zip(rollout_responses, repeated_ground_truths)]
+    raw_rewards = torch.tensor(rewards_list, dtype=torch.float32)
+
+    # Step 2: Reshape to 2D tensor (num_groups, group_size)
+    rewards_2d = raw_rewards.reshape(-1, group_size)
+
+    # Step 3: Calculate mean reward for each group
+    group_mean = rewards_2d.mean(dim=1, keepdim=True)
+
+    # Step 4: Compute advantages by subtracting group mean
+    advantages = rewards_2d - group_mean
+
+    # Step 5: Normalize by std if required
+    if normalize_by_std:
+        group_std = rewards_2d.std(dim=1, keepdim=True)
+        advantages = advantages / (group_std + advantage_eps)
+
+    # Step 6: Flatten back to 1D tensor
+    advantages = advantages.flatten()
+
+    # Step 7: Create metadata dictionary
+    metadata = {
+        "mean": torch.mean(raw_rewards),
+        "std": torch.std(raw_rewards),
+        "max": torch.max(raw_rewards),
+        "min": torch.min(raw_rewards),
+    }
     ### END YOUR CODE ###
     return advantages, raw_rewards, metadata
 
@@ -354,7 +425,18 @@ def compute_loss(
     """
     loss = 0.0
     ### YOUR CODE HERE ###
-    pass
+    # Step 1: Calculate probability ratio
+    pi_ratio = torch.exp(policy_log_probs - old_log_probs)
+
+    # Step 2: Calculate unclipped term
+    unclipped_term = advantages * pi_ratio
+
+    # Step 3: Calculate clipped term
+    pi_ratio_clipped = torch.clamp(pi_ratio, 1 - clip_range, 1 + clip_range)
+    clipped_term = advantages * pi_ratio_clipped
+
+    # Step 4: Final loss (negative minimum for maximization)
+    loss = -torch.minimum(unclipped_term, clipped_term)
     ### END YOUR CODE ###
     return loss
 
