@@ -336,7 +336,7 @@ def compute_group_normalized_advantages(
     normalize_by_std: bool,
 ) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, torch.Tensor]]:
     """ Computes advantages by normalizing rewards within groups.
-    
+
     Args:
         rollout_responses: List of generated responses (length = batch_size * group_size)
         repeated_ground_truths: Ground truth repeated for each response
@@ -344,7 +344,7 @@ def compute_group_normalized_advantages(
         group_size: Number of responses per question (G)
         advantage_eps: Small constant for numerical stability (epsilon)
         normalize_by_std: If True, normalize by std (GRPO); if False, don't (DR-GRPO)
-    
+
     Returns:
         advantages: Flattened tensor of advantages (shape: [batch_size * group_size])
         raw_rewards: Original rewards before normalization
@@ -367,7 +367,34 @@ def compute_group_normalized_advantages(
     # 7. Create a `metadata` dictionary with overall statistics of the raw rewards.
     advantages, raw_rewards, metadata = None, None, {}
     ### YOUR CODE HERE ###
-    pass
+    # Step 1: Calculate raw rewards for each response
+    rewards_list = [reward_fn(response, gt) for response, gt in zip(rollout_responses, repeated_ground_truths)]
+    raw_rewards = torch.tensor(rewards_list, dtype=torch.float32)
+
+    # Step 2: Reshape to 2D tensor (num_groups, group_size)
+    rewards_2d = raw_rewards.reshape(-1, group_size)
+
+    # Step 3: Calculate mean reward for each group
+    group_mean = rewards_2d.mean(dim=1, keepdim=True)
+
+    # Step 4: Compute advantages by subtracting group mean
+    advantages = rewards_2d - group_mean
+
+    # Step 5: Normalize by std if required
+    if normalize_by_std:
+        group_std = rewards_2d.std(dim=1, keepdim=True)
+        advantages = advantages / (group_std + advantage_eps)
+
+    # Step 6: Flatten back to 1D tensor
+    advantages = advantages.flatten()
+
+    # Step 7: Create metadata dictionary
+    metadata = {
+        "mean": torch.mean(raw_rewards),
+        "std": torch.std(raw_rewards),
+        "max": torch.max(raw_rewards),
+        "min": torch.min(raw_rewards),
+    }
     ### END YOUR CODE ###
     return advantages, raw_rewards, metadata
 
