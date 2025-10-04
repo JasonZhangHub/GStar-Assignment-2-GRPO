@@ -425,7 +425,18 @@ def compute_loss(
     """
     loss = 0.0
     ### YOUR CODE HERE ###
-    pass
+    # Step 1: Calculate probability ratio
+    pi_ratio = torch.exp(policy_log_probs - old_log_probs)
+
+    # Step 2: Calculate unclipped term
+    unclipped_term = advantages * pi_ratio
+
+    # Step 3: Calculate clipped term
+    pi_ratio_clipped = torch.clamp(pi_ratio, 1 - clip_range, 1 + clip_range)
+    clipped_term = advantages * pi_ratio_clipped
+
+    # Step 4: Final loss (negative minimum for maximization)
+    loss = -torch.minimum(unclipped_term, clipped_term)
     ### END YOUR CODE ###
     return loss
 
