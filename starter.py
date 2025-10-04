@@ -135,7 +135,11 @@ def _extract_answer(solution_str: str) -> str | None:
         The stripped string content of the last answer tag, or None if no tag is found.
     """
     ### YOUR CODE HERE ###
-    pass
+    pattern = r'<answer>(.*?)</answer>'
+    matches = list(re.finditer(pattern, solution_str, re.DOTALL))
+    if matches:
+        return matches[-1].group(1).strip()
+    return None
     ### END YOUR CODE ###
 
 
@@ -155,7 +159,13 @@ def _validate_numbers(equation_str: str, available_numbers: List[int]) -> bool:
         True if the equation uses the correct numbers, False otherwise.
     """
     ### YOUR CODE HERE ###
-    pass
+    try:
+        used_numbers = [int(num) for num in re.findall(r"\d+", equation_str)]
+        available_sorted = sorted(available_numbers)
+        used_sorted = sorted(used_numbers)
+        return available_sorted == used_sorted
+    except:
+        return False
     ### END YOUR CODE ###
 
 
@@ -168,7 +178,21 @@ def _evaluate_equation(equation_str: str) -> float | None:
         The result of the equation as a float, or None if it's invalid or unsafe.
     """
     ### YOUR CODE HERE ###
-    pass
+    try:
+        # Only allow digits, spaces, and basic arithmetic operators
+        allowed_chars = set('0123456789 +-*/()')
+        if not all(c in allowed_chars for c in equation_str):
+            return None
+
+        # Check for implicit multiplication (e.g., "2(3)" or "(2)(3)")
+        if re.search(r'\d\s*\(|\)\s*\(|\)\s*\d', equation_str):
+            return None
+
+        # Evaluate the equation
+        result = eval(equation_str)
+        return float(result)
+    except:
+        return None
     ### END YOUR CODE ###
 
 # ==============================================================================
