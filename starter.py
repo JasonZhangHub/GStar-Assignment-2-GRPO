@@ -218,7 +218,27 @@ def reward_fn(generated_text: str, ground_truth: Dict) -> float:
         A float value representing the reward, such as 1.0, 0.1, or 0.0
     """
     ### YOUR CODE HERE ###
-    pass
+    # Extract the equation from the generated text
+    equation = _extract_answer(generated_text)
+
+    # If no <answer> tag found, return 0.0
+    if equation is None:
+        return 0.0
+
+    # Extract target and available numbers from ground truth
+    target = ground_truth["target"]
+    available_numbers = ground_truth["numbers"]
+
+    # Validate numbers and evaluate equation
+    numbers_valid = _validate_numbers(equation, available_numbers)
+    result = _evaluate_equation(equation)
+
+    # Check if equation is correct (valid numbers, evaluates correctly to target)
+    if numbers_valid and result is not None and abs(result - target) < 1e-6:
+        return 1.0
+
+    # If <answer> tag exists but equation is wrong, return 0.1
+    return 0.1
     ### END YOUR CODE ###
 
 
