@@ -591,8 +591,8 @@ def main() -> None:
     # Hyperparameters
     model_id = "Qwen/Qwen3-1.7B"
     device = "cuda"
-    seed, gpu_mem_util = 42, 0.4
-    n_grpo_steps, rollout_batch_size, group_size, grad_acc_steps = 80, 128, 8, 32
+    seed, gpu_mem_util = 42, 0.3
+    n_grpo_steps, rollout_batch_size, group_size, grad_acc_steps = 80, 64, 8, 16
     lr, clip_range, adv_eps = 7e-6, 0.2, 1e-6
     temperature, min_tokens = 1.0, 4
     eval_every = 10
