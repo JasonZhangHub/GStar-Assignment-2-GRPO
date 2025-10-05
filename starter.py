@@ -438,7 +438,8 @@ def compute_loss(
     # Step 4: Final loss (negative minimum for maximization)
     loss = -torch.minimum(unclipped_term, clipped_term)
     ### END YOUR CODE ###
-    return loss
+    metadata = {}
+    return loss, metadata
 
 
 def masked_mean(tensor: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
