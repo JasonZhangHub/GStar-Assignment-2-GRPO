@@ -533,7 +533,7 @@ def train(
     group_size: int, gradient_accumulation_steps: int, clip_range: float, use_std_normalization: bool,
     advantage_eps: float, device: str, eval_every: int = 5, writer: SummaryWriter = None, seed: int,
     loss_type: str = "grpo", max_completion_length: int = 256,
-) -> None:
+) -> Dict[str, Any]:
     n_prompts_per_rollout_batch = rollout_batch_size // group_size
     micro_train_batch_size = rollout_batch_size // gradient_accumulation_steps
     random.seed(seed)
@@ -577,6 +577,11 @@ def train(
             metrics = evaluate_model(llm, sampling_params, eval_prompts, eval_answers)
             log_eval(metrics, writer, train_step)
 
+    # Final evaluation
+    final_metrics = evaluate_model(llm, sampling_params, eval_prompts, eval_answers)
+    log_eval(final_metrics, writer, train_step)
+    return final_metrics
+
 
 def init_policy(model_id: str, device: str) -> Tuple[PreTrainedModel, AutoTokenizer]:
     model = AutoModelForCausalLM.from_pretrained(
@@ -587,26 +592,21 @@ def init_policy(model_id: str, device: str) -> Tuple[PreTrainedModel, AutoTokeni
     return model, tokenizer
 
 
-def main() -> None:
-    # Hyperparameters
-    model_id = "Qwen/Qwen3-1.7B"
-    device = "cuda"
-    seed, gpu_mem_util = 42, 0.3
-    n_grpo_steps, rollout_batch_size, group_size, grad_acc_steps = 80, 64, 8, 16
-    lr, clip_range, adv_eps = 7e-6, 0.2, 1e-6
-    temperature, min_tokens = 1.0, 4
-    eval_every = 10
+def run_single_experiment(loss_type: str, max_tokens: int, model_id: str, device: str, seed: int,
+                          gpu_mem_util: float, n_grpo_steps: int, rollout_batch_size: int,
+                          group_size: int, grad_acc_steps: int, lr: float, clip_range: float,
+                          adv_eps: float, temperature: float, min_tokens: int, eval_every: int) -> Dict[str, Any]:
+    """Run a single training experiment with given hyperparameters."""
+    print(f"\n{'='*80}")
+    print(f"Starting experiment: loss_type={loss_type}, max_tokens={max_tokens}")
+    print(f"{'='*80}\n")
 
-    # CHANGING HYPERPARAMETERS for main assignment
-    loss_type = "grpo" # or "dr_grpo"
-    max_tokens = 256 # or 512, 1024
-    
     # Initialization
     use_std_norm = loss_type == "dr_grpo"
     policy, tokenizer = init_policy(model_id=model_id, device=device)
     llm = init_vllm(model_id=model_id, device=device, seed=seed, gpu_memory_utilization=gpu_mem_util)
     sampling_params = init_sampling_params(temperature=temperature, min_tokens=min_tokens, max_tokens=max_tokens)
-    
+
     # Dataset
     def build_dataset(split):
         data = []
@@ -622,22 +622,22 @@ def main() -> None:
     # Load properly split dataset
     train_data = load_dataset("justinphan3110/Countdown-Tasks-3to4", split="train")
     eval_data = load_dataset("justinphan3110/Countdown-Tasks-3to4", split="test")
-    
+
     train_examples = build_dataset(train_data)
     eval_examples = build_dataset(eval_data)
-    
+
     # Optimizer and Scheduler
     optimizer = torch.optim.AdamW(policy.parameters(), lr=lr, weight_decay=1e-2, betas=(0.9, 0.95))
     scheduler = get_constant_schedule_with_warmup(optimizer=optimizer, num_warmup_steps=0)
-    
+
     # Logging
     timestamp = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
-    log_dir = os.path.join("./output", "tb", f"hw_a2_{loss_type}", str(timestamp))
+    log_dir = os.path.join("./output", "tb", f"hw_a2_{loss_type}_tokens{max_tokens}", str(timestamp))
     os.makedirs(log_dir, exist_ok=True)
     writer = SummaryWriter(log_dir=log_dir)
-    
+
     # Training
-    train(
+    final_metrics = train(
         policy=policy, tokenizer=tokenizer, llm=llm, sampling_params=sampling_params,
         train_prompts=[ex["prompt"] for ex in train_examples], train_answers=[ex["answer"] for ex in train_examples],
         eval_prompts=[ex["prompt"] for ex in eval_examples], eval_answers=[ex["answer"] for ex in eval_examples],
@@ -648,14 +648,122 @@ def main() -> None:
         eval_every=eval_every, writer=writer, seed=seed, loss_type=loss_type,
         max_completion_length=max_tokens
     )
-    
+
     # Save model
-    out_dir = os.path.join("./output", f"hw_a2_solution_{timestamp}")
+    out_dir = os.path.join("./output", f"hw_a2_{loss_type}_tokens{max_tokens}_{timestamp}")
     os.makedirs(out_dir, exist_ok=True)
     policy.save_pretrained(out_dir)
     tokenizer.save_pretrained(out_dir)
     print(f"Saved model and tokenizer to {out_dir}")
     writer.close()
+
+    # Clean up GPU memory
+    del policy, llm, optimizer, scheduler
+    torch.cuda.empty_cache()
+
+    return {
+        "loss_type": loss_type,
+        "max_tokens": max_tokens,
+        "accuracy": final_metrics["accuracy"],
+        "mean_reward": final_metrics["mean_reward"],
+        "std_reward": final_metrics["std_reward"],
+        "count_correct": final_metrics["count_correct"],
+        "count_partial": final_metrics["count_partial"],
+        "count_failed": final_metrics["count_failed"],
+        "avg_output_tokens": final_metrics["avg_output_tokens"],
+        "model_dir": out_dir,
+        "timestamp": timestamp,
+    }
+
+
+def main() -> None:
+    # Hyperparameters
+    model_id = "Qwen/Qwen3-1.7B"
+    device = "cuda"
+    seed, gpu_mem_util = 42, 0.5
+    n_grpo_steps, rollout_batch_size, group_size, grad_acc_steps = 80, 64, 8, 16
+    lr, clip_range, adv_eps = 7e-6, 0.2, 1e-6
+    temperature, min_tokens = 1.0, 4
+    eval_every = 10
+
+    # Experiment configurations
+    loss_types = ["grpo", "dr_grpo"]
+    max_tokens_list = [256, 512, 1024]
+
+    # Run all experiments
+    all_results = []
+    for loss_type in loss_types:
+        for max_tokens in max_tokens_list:
+            result = run_single_experiment(
+                loss_type=loss_type,
+                max_tokens=max_tokens,
+                model_id=model_id,
+                device=device,
+                seed=seed,
+                gpu_mem_util=gpu_mem_util,
+                n_grpo_steps=n_grpo_steps,
+                rollout_batch_size=rollout_batch_size,
+                group_size=group_size,
+                grad_acc_steps=grad_acc_steps,
+                lr=lr,
+                clip_range=clip_range,
+                adv_eps=adv_eps,
+                temperature=temperature,
+                min_tokens=min_tokens,
+                eval_every=eval_every,
+            )
+            all_results.append(result)
+
+    # Save summary
+    summary_file = os.path.join("./output", "experiment_summary.txt")
+    os.makedirs("./output", exist_ok=True)
+
+    with open(summary_file, "w") as f:
+        f.write("="*80 + "\n")
+        f.write("GRPO/DR-GRPO Experiment Summary\n")
+        f.write("="*80 + "\n\n")
+
+        f.write(f"Total experiments: {len(all_results)}\n")
+        f.write(f"Model: {model_id}\n")
+        f.write(f"GRPO steps: {n_grpo_steps}\n")
+        f.write(f"Rollout batch size: {rollout_batch_size}\n")
+        f.write(f"Group size: {group_size}\n\n")
+
+        f.write("-"*80 + "\n")
+        f.write("Results:\n")
+        f.write("-"*80 + "\n\n")
+
+        for i, result in enumerate(all_results, 1):
+            f.write(f"Experiment {i}:\n")
+            f.write(f"  Loss type: {result['loss_type']}\n")
+            f.write(f"  Max tokens: {result['max_tokens']}\n")
+            f.write(f"  Accuracy: {result['accuracy']:.2f}%\n")
+            f.write(f"  Mean reward: {result['mean_reward']:.4f}\n")
+            f.write(f"  Std reward: {result['std_reward']:.4f}\n")
+            f.write(f"  Correct: {result['count_correct']}\n")
+            f.write(f"  Partial: {result['count_partial']}\n")
+            f.write(f"  Failed: {result['count_failed']}\n")
+            f.write(f"  Avg output tokens: {result['avg_output_tokens']:.1f}\n")
+            f.write(f"  Model saved to: {result['model_dir']}\n")
+            f.write("\n")
+
+        f.write("-"*80 + "\n")
+        f.write("Summary Table:\n")
+        f.write("-"*80 + "\n\n")
+        f.write(f"{'Loss Type':<12} {'Max Tokens':<12} {'Accuracy (%)':<15} {'Mean Reward':<15} {'Correct':<10}\n")
+        f.write("-"*80 + "\n")
+        for result in all_results:
+            f.write(f"{result['loss_type']:<12} {result['max_tokens']:<12} "
+                   f"{result['accuracy']:<15.2f} {result['mean_reward']:<15.4f} "
+                   f"{result['count_correct']:<10}\n")
+
+    print(f"\n{'='*80}")
+    print(f"All experiments completed! Summary saved to: {summary_file}")
+    print(f"{'='*80}\n")
+
+    # Print summary to console
+    with open(summary_file, "r") as f:
+        print(f.read())
 
 if __name__ == "__main__":
     main()

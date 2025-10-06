@@ -25,7 +25,7 @@ def is_correct(response: str, target: float, numbers: list) -> bool:
 def main():
     parser = argparse.ArgumentParser(description="Zero-shot evaluation of math reasoning")
     parser.add_argument("-m", "--model", default="Qwen/Qwen3-1.7B", help="Model ID to evaluate")
-    parser.add_argument("--max_tokens", type=int, default=256, help="Maximum tokens for generation (default: 256)")
+    parser.add_argument("--max_tokens", type=int, default=1024, help="Maximum tokens for generation (default: 256)")
     args = parser.parse_args()
     
     MODEL_ID = args.model
